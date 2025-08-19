@@ -13,6 +13,8 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
+const MetadataRedeliveredKey = "_watermill_amqp_redelivered"
+
 type Subscriber struct {
 	*ConnectionWrapper
 
@@ -400,6 +402,12 @@ func (s *subscription) processMessage(
 	msgLogFields := logFields.Add(watermill.LogFields{"message_uuid": msg.UUID})
 	s.logger.Trace("Unmarshaled message", msgLogFields)
 
+	// Redelivered flag is set to true when the message is redelivered.
+	if amqpMsg.Redelivered {
+		msg.Metadata.Set(MetadataRedeliveredKey, "true")
+		s.logger.Trace("Message redelivered", msgLogFields)
+	}
+
 	select {
 	case <-s.closing:
 		s.logger.Info("Message not consumed, pub/sub is closing", msgLogFields)
@@ -429,4 +437,9 @@ func (s *subscription) processMessage(
 
 func (s *subscription) nackMsg(amqpMsg amqp.Delivery) error {
 	return amqpMsg.Nack(false, !s.config.Consume.NoRequeueOnNack)
+}
+
+// IsMessageRedelivered checks whether the message was redelivered by AMQP.
+func IsMessageRedelivered(msg *message.Message) bool {
+	return msg.Metadata.Get(MetadataRedeliveredKey) == "true"
 }
